@@ -1,0 +1,229 @@
+{
+  "baseline": {
+    "hellaswag": 0.5,
+    "arc_easy": 0.68
+  },
+  "thresholds": {
+    "max_drop_pp": 1.0,
+    "max_drop_rel": 0.03
+  },
+  "all_variants": [
+    {
+      "comparable": true,
+      "tasks": [
+        "arc_easy",
+        "hellaswag"
+      ],
+      "mean_ratio": 1.005294,
+      "worst_drop_pp": 2.0,
+      "worst_drop_rel_pct": 2.9412,
+      "tasks_won": 1,
+      "bytes_ratio": 0.28,
+      "score": 0.990894,
+      "passed_threshold": false,
+      "per_task": {
+        "arc_easy": {
+          "baseline": 0.68,
+          "variant": 0.66,
+          "drop_pp": 2.0,
+          "drop_rel_pct": 2.941
+        },
+        "hellaswag": {
+          "baseline": 0.5,
+          "variant": 0.52,
+          "drop_pp": -2.0,
+          "drop_rel_pct": -4.0
+        }
+      },
+      "matrix_id": "awq__w4a16__linall",
+      "status": "ok",
+      "algorithm": "awq",
+      "scheme": "W4A16",
+      "target": "linall",
+      "quant_status": "ok"
+    },
+    {
+      "comparable": true,
+      "tasks": [
+        "arc_easy",
+        "hellaswag"
+      ],
+      "mean_ratio": 1.007941,
+      "worst_drop_pp": 3.0,
+      "worst_drop_rel_pct": 4.4118,
+      "tasks_won": 1,
+      "bytes_ratio": 0.28,
+      "score": 0.993541,
+      "passed_threshold": false,
+      "per_task": {
+        "arc_easy": {
+          "baseline": 0.68,
+          "variant": 0.65,
+          "drop_pp": 3.0,
+          "drop_rel_pct": 4.412
+        },
+        "hellaswag": {
+          "baseline": 0.5,
+          "variant": 0.53,
+          "drop_pp": -3.0,
+          "drop_rel_pct": -6.0
+        }
+      },
+      "matrix_id": "awq__w4a16__mlp",
+      "status": "ok",
+      "algorithm": "awq",
+      "scheme": "W4A16",
+      "target": "mlp",
+      "quant_status": "ok"
+    },
+    {
+      "comparable": true,
+      "tasks": [
+        "arc_easy",
+        "hellaswag"
+      ],
+      "mean_ratio": 1.014706,
+      "worst_drop_pp": 0.0,
+      "worst_drop_rel_pct": 0.0,
+      "tasks_won": 2,
+      "bytes_ratio": 0.28,
+      "score": 1.000306,
+      "passed_threshold": true,
+      "per_task": {
+        "arc_easy": {
+          "baseline": 0.68,
+          "variant": 0.7,
+          "drop_pp": -2.0,
+          "drop_rel_pct": -2.941
+        },
+        "hellaswag": {
+          "baseline": 0.5,
+          "variant": 0.5,
+          "drop_pp": 0.0,
+          "drop_rel_pct": 0.0
+        }
+      },
+      "matrix_id": "gptq__w4a16__linall",
+      "status": "ok",
+      "algorithm": "gptq",
+      "scheme": "W4A16",
+      "target": "linall",
+      "quant_status": "ok"
+    },
+    {
+      "comparable": true,
+      "tasks": [
+        "arc_easy",
+        "hellaswag"
+      ],
+      "mean_ratio": 1.002647,
+      "worst_drop_pp": 1.0,
+      "worst_drop_rel_pct": 1.4706,
+      "tasks_won": 1,
+      "bytes_ratio": 0.5,
+      "score": 0.992647,
+      "passed_threshold": false,
+      "per_task": {
+        "arc_easy": {
+          "baseline": 0.68,
+          "variant": 0.67,
+          "drop_pp": 1.0,
+          "drop_rel_pct": 1.471
+        },
+        "hellaswag": {
+          "baseline": 0.5,
+          "variant": 0.51,
+          "drop_pp": -1.0,
+          "drop_rel_pct": -2.0
+        }
+      },
+      "matrix_id": "sq__w8a8__linall",
+      "status": "ok",
+      "algorithm": "smoothquant",
+      "scheme": "W8A8",
+      "target": "linall",
+      "quant_status": "ok"
+    },
+    {
+      "matrix_id": "stage3.1-smoke",
+      "status": "eval_missing_or_failed",
+      "comparable": false
+    },
+    {
+      "matrix_id": "stage3_0_test",
+      "status": "eval_missing_or_failed",
+      "comparable": false
+    }
+  ],
+  "passed": [
+    {
+      "comparable": true,
+      "tasks": [
+        "arc_easy",
+        "hellaswag"
+      ],
+      "mean_ratio": 1.014706,
+      "worst_drop_pp": 0.0,
+      "worst_drop_rel_pct": 0.0,
+      "tasks_won": 2,
+      "bytes_ratio": 0.28,
+      "score": 1.000306,
+      "passed_threshold": true,
+      "per_task": {
+        "arc_easy": {
+          "baseline": 0.68,
+          "variant": 0.7,
+          "drop_pp": -2.0,
+          "drop_rel_pct": -2.941
+        },
+        "hellaswag": {
+          "baseline": 0.5,
+          "variant": 0.5,
+          "drop_pp": 0.0,
+          "drop_rel_pct": 0.0
+        }
+      },
+      "matrix_id": "gptq__w4a16__linall",
+      "status": "ok",
+      "algorithm": "gptq",
+      "scheme": "W4A16",
+      "target": "linall",
+      "quant_status": "ok"
+    }
+  ],
+  "best": {
+    "comparable": true,
+    "tasks": [
+      "arc_easy",
+      "hellaswag"
+    ],
+    "mean_ratio": 1.014706,
+    "worst_drop_pp": 0.0,
+    "worst_drop_rel_pct": 0.0,
+    "tasks_won": 2,
+    "bytes_ratio": 0.28,
+    "score": 1.000306,
+    "passed_threshold": true,
+    "per_task": {
+      "arc_easy": {
+        "baseline": 0.68,
+        "variant": 0.7,
+        "drop_pp": -2.0,
+        "drop_rel_pct": -2.941
+      },
+      "hellaswag": {
+        "baseline": 0.5,
+        "variant": 0.5,
+        "drop_pp": 0.0,
+        "drop_rel_pct": 0.0
+      }
+    },
+    "matrix_id": "gptq__w4a16__linall",
+    "status": "ok",
+    "algorithm": "gptq",
+    "scheme": "W4A16",
+    "target": "linall",
+    "quant_status": "ok"
+  },
+  "verdict": "found"
+}

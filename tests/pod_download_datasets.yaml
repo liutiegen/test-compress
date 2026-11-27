@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ds-download
+  namespace: st-compress
+spec:
+  restartPolicy: Never
+  imagePullSecrets:
+    - name: acr-cred
+  nodeSelector:
+    kubernetes.io/hostname: cn-qingdao.10.29.190.206
+  containers:
+    - name: dl
+      image: test-acr-business-registry.cn-shanghai.cr.aliyuncs.com/test-llm-compressor/test:stage1_3-eval-v1-11271119
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/bash", "/scripts/dl.sh"]
+      env:
+        - name: HF_ENDPOINT
+          value: "https://hf-mirror.com"
+        - name: HF_HUB_OFFLINE
+          value: "0"
+        - name: HF_DATASETS_OFFLINE
+          value: "0"
+        - name: HF_DATASETS_CACHE
+          value: "/bench/ds_cache"
+        - name: HF_HOME
+          value: "/bench/hf_home"
+      volumeMounts:
+        - name: bench
+          mountPath: /bench
+        - name: scripts
+          mountPath: /scripts
+      resources:
+        requests:
+          cpu: "2"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 16Gi
+  volumes:
+    - name: bench
+      hostPath:
+        path: /root/bench
+        type: DirectoryOrCreate
+    - name: scripts
+      configMap:
+        name: ds-download-script
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ds-download-script
+  namespace: st-compress
+data:
+  dl.sh: |
+    #!/bin/bash
+    set -e
+    export HF_ENDPOINT=https://hf-mirror.com
+    export HF_HUB_OFFLINE=0
+    export HF_DATASETS_OFFLINE=0
+    export HF_DATASETS_CACHE=/bench/ds_cache
+    export HF_HOME=/bench/hf_home
+    mkdir -p /bench/ds_cache /bench/hf_home
+    echo "=== download start ==="
+    python3 /scripts/dl.py
+    echo "=== size ==="
+    du -sh /bench/ds_cache /bench/hf_home
+  dl.py: |
+    import time
+    from datasets import load_dataset
+
+    # 必须是 lm-eval 任务 yaml 里实际引用的 (path, name) 组合，
+    # 凭直觉写 repo 名会 DatasetNotFoundError 或 Config name is missing：
+    #   arc_easy / arc_challenge -> allenai/ai2_arc, ARC-Easy / ARC-Challenge
+    #   winogrande               -> allenai/winogrande, winogrande_xl
+    #   gsm8k                    -> openai/gsm8k, main
+    #   hellaswag                -> Rowan/hellaswag, (no config)
+    jobs = [
+        ("allenai/ai2_arc", "ARC-Easy"),
+        ("allenai/ai2_arc", "ARC-Challenge"),
+        ("allenai/winogrande", "winogrande_xl"),
+        ("openai/gsm8k", "main"),
+        ("Rowan/hellaswag", None),
+    ]
+    for path, name in jobs:
+        t0 = time.time()
+        label = f"{path}" + (f"[{name}]" if name else "")
+        print("downloading", label, flush=True)
+        try:
+            if name:
+                load_dataset(path, name)
+            else:
+                load_dataset(path)
+            print("OK", label, round(time.time() - t0, 1), "s", flush=True)
+        except Exception as e:
+            print("FAIL", label, type(e).__name__, str(e)[:300], flush=True)
+    print("ALL DONE", flush=True)

@@ -67,7 +67,8 @@ case "$SUBCOMMAND" in
       --model-path "$RUN_DIR/model" \
       --output-dir "$RUN_DIR" \
       --label "$MATRIX_ID" \
-      --limit "${EVAL_LIMIT:-}" || true
+      --limit "${EVAL_LIMIT:-}" \
+      --dtype "${EVAL_DTYPE:-auto}" || true
     # eval 允许失败（记录在 eval_metrics.json 里），但 quant 失败必须让 Pod 失败
     ;;
 
@@ -77,7 +78,8 @@ case "$SUBCOMMAND" in
       --model-path "${EVAL_MODEL_PATH:-$MODEL_PATH}" \
       --output-dir "$RUN_DIR" \
       --label "$MATRIX_ID" \
-      --limit "${EVAL_LIMIT:-}"
+      --limit "${EVAL_LIMIT:-}" \
+      --dtype "${EVAL_DTYPE:-auto}"
     ;;
 
   finetune)
@@ -95,7 +97,8 @@ case "$SUBCOMMAND" in
       --model-path "$RUN_DIR/model" \
       --output-dir "$RUN_DIR" \
       --label "$MATRIX_ID" \
-      --limit "${EVAL_LIMIT:-}" || true
+      --limit "${EVAL_LIMIT:-}" \
+      --dtype "${EVAL_DTYPE:-auto}" || true
     ;;
 
   *)

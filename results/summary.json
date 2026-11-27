@@ -1,0 +1,48 @@
+{
+  "baseline": {
+    "hellaswag": 0.5,
+    "arc_easy": 0.68
+  },
+  "variants": [
+    {
+      "label": "awq__w4a16__mlp",
+      "metrics": {
+        "hellaswag": 0.53,
+        "arc_easy": 0.65
+      },
+      "path": "awq__w4a16__mlp/eval_metrics.json"
+    },
+    {
+      "label": "sq__w8a8__linall",
+      "metrics": {
+        "hellaswag": 0.51,
+        "arc_easy": 0.67
+      },
+      "path": "sq__w8a8__linall/eval_metrics.json"
+    },
+    {
+      "label": "awq__w4a16__linall",
+      "metrics": {
+        "hellaswag": 0.52,
+        "arc_easy": 0.66
+      },
+      "path": "awq__w4a16__linall/eval_metrics.json"
+    },
+    {
+      "label": "baseline",
+      "metrics": {
+        "hellaswag": 0.5,
+        "arc_easy": 0.68
+      },
+      "path": "baseline/eval_metrics.json"
+    },
+    {
+      "label": "gptq__w4a16__linall",
+      "metrics": {
+        "hellaswag": 0.5,
+        "arc_easy": 0.7
+      },
+      "path": "gptq__w4a16__linall/eval_metrics.json"
+    }
+  ]
+}

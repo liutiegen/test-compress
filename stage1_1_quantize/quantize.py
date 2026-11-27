@@ -229,6 +229,7 @@ def main() -> int:
         "matrix_id": args.matrix_id or variant_obj.matrix_id,
         "algorithm": args.algorithm,
         "scheme": args.scheme,
+        "target": args.target,
         "preset_scheme": SCHEMES[args.scheme][0],
         "targets": variant_obj.targets,
         "use_kv_cache": variant_obj.use_kv_cache,

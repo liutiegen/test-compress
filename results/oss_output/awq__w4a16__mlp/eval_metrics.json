@@ -1,0 +1,43 @@
+{
+  "label": "awq__w4a16__mlp",
+  "model_path": "/output/awq__w4a16__mlp/model",
+  "status": "ok",
+  "backend": "vllm",
+  "tasks_requested": [
+    "arc_easy",
+    "hellaswag"
+  ],
+  "fewshot": {
+    "arc_easy": 25,
+    "hellaswag": 10
+  },
+  "limit": 100.0,
+  "batch_size": "auto",
+  "max_model_len": 4096,
+  "dtype": "auto",
+  "results": {
+    "hellaswag": {
+      "metrics": {
+        "sample_len": 100,
+        "acc,none": 0.43,
+        "acc_stderr,none": 0.049756985195624305,
+        "acc_norm,none": 0.53,
+        "acc_norm_stderr,none": 0.05016135580465919
+      },
+      "primary_metric": "acc_norm,none",
+      "primary_value": 0.53
+    },
+    "arc_easy": {
+      "metrics": {
+        "sample_len": 100,
+        "acc,none": 0.63,
+        "acc_stderr,none": 0.048523658709390974,
+        "acc_norm,none": 0.65,
+        "acc_norm_stderr,none": 0.04793724854411023
+      },
+      "primary_metric": "acc_norm,none",
+      "primary_value": 0.65
+    }
+  },
+  "elapsed_sec": 385.8
+}

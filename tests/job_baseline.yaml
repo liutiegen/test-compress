@@ -1,0 +1,105 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: baseline-eval
+  namespace: st-compress
+  labels:
+    app: quant
+    matrix-id: baseline
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: quant
+        matrix-id: baseline
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: acr-cred
+      containers:
+        - name: eval
+          image: test-acr-business-registry.cn-shanghai.cr.aliyuncs.com/test-llm-compressor/test:stage1_1-quant-v1-11271119
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/scripts/run_eval.sh"]
+          env:
+            # lm-eval 任务数据集已在 OSS benchmark_hf_cache/，经输入 PVC 挂到 /data
+            - name: HF_DATASETS_CACHE
+              value: /data/benchmark_hf_cache/ds_cache
+            - name: HF_HOME
+              value: /data/benchmark_hf_cache/hf_home
+            - name: EVAL_LIMIT
+              value: "100"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          volumeMounts:
+            - name: input
+              mountPath: /data
+              readOnly: true
+            - name: output
+              mountPath: /output
+            - name: scripts
+              mountPath: /scripts
+            - name: shm
+              mountPath: /dev/shm
+            - name: hfcache
+              mountPath: /tmp/hfcache
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              cpu: "6"
+              memory: 28Gi
+            requests:
+              nvidia.com/gpu: 1
+              cpu: "4"
+              memory: 20Gi
+      volumes:
+        - name: input
+          persistentVolumeClaim:
+            claimName: pvc-stage-1-1-input
+            readOnly: true
+        - name: output
+          persistentVolumeClaim:
+            claimName: pvc-stage-1-1-quant
+        - name: scripts
+          configMap:
+            name: baseline-eval-script
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi
+        - name: hfcache
+          emptyDir:
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: baseline-eval-script
+  namespace: st-compress
+data:
+  run_eval.sh: |
+    #!/bin/bash
+    set -e
+    # 镜像内 evaluate.py 默认 dtype=bfloat16；T4(sm75) 不支持 bf16，
+    # vLLM 初始化会 ValueError。必须显式 --dtype auto 退回 float16。
+    # datasets 库需要在 cache 目录写 .lock 文件，而输入 PVC 是只读的
+    # （ReadOnlyMany），直接用会 OSError: Read-only file system。
+    # 因此把 207MB 缓存拷到容器可写的 emptyDir 再用。
+    mkdir -p /tmp/hfcache
+    cp -r /data/benchmark_hf_cache/ds_cache /tmp/hfcache/ds_cache
+    cp -r /data/benchmark_hf_cache/hf_home /tmp/hfcache/hf_home
+    export HF_DATASETS_CACHE=/tmp/hfcache/ds_cache
+    export HF_HOME=/tmp/hfcache/hf_home
+    mkdir -p /output/baseline
+    echo "=== datasets cache ==="
+    ls /tmp/hfcache/ds_cache 2>&1 | head -5
+    echo "=== eval start ==="
+    python3 /workspace/stage1_1_quantize/evaluate.py \
+      --model-path /data/Qwen2.5-0.5B-Instruct \
+      --output-dir /output/baseline \
+      --label baseline \
+      --dtype auto \
+      --limit "${EVAL_LIMIT:-100}" \
+      --tasks arc_easy,hellaswag

@@ -151,8 +151,19 @@ def main() -> int:
             rows.append({"matrix_id": d.name, "status": "eval_missing_or_failed",
                          "comparable": False})
             continue
-        qm = load(d / "quant_metrics.json") or {}
+        # quant_metrics.json 由 quantize.py 写在 --output-dir 下，
+        # 而 Job 里 --output-dir 是 $OUT/model，所以实际落在 model/ 子目录。
+        # 两处都找，避免元信息丢失（丢了会导致 scheme=UNKNOWN、
+        # 压缩率惩罚算不出来，进而影响排序）。
+        qm = (load(d / "model" / "quant_metrics.json")
+              or load(d / "quant_metrics.json") or {})
         variant = qm.get("variant") or ev.get("variant") or {}
+        # 兼容早期产物：quant_metrics.json 里没有 target 字段。
+        # matrix_id 形如 algo__scheme__target，可从中反推，避免重跑任务。
+        if not variant.get("target"):
+            parts = d.name.split("__")
+            if len(parts) == 3:
+                variant = {**variant, "_id_parts": parts}
         scheme = variant.get("scheme", "UNKNOWN")
         s = score_variant(base, primary_map(ev), scheme,
                           args.max_drop_pp, args.max_drop_rel)
@@ -161,7 +172,8 @@ def main() -> int:
             "status": ev.get("status"),
             "algorithm": variant.get("algorithm"),
             "scheme": scheme,
-            "target": variant.get("target"),
+            "target": variant.get("target") or (
+                variant.get("_id_parts") or [None, None, None])[2],
             "quant_status": qm.get("status"),
         })
         rows.append(s)

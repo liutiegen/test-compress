@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ds-upload
+  namespace: st-compress
+spec:
+  restartPolicy: Never
+  imagePullSecrets:
+    - name: acr-cred
+  nodeSelector:
+    kubernetes.io/hostname: cn-qingdao.10.29.190.206
+  containers:
+    - name: up
+      image: test-acr-business-registry.cn-shanghai.cr.aliyuncs.com/test-llm-compressor/test:stage1_3-eval-v1-11271119
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/bash", "/scripts/up.sh"]
+      env:
+        - name: OSS_AK_ID
+          valueFrom:
+            secretKeyRef:
+              name: oss-ak-secret
+              key: akId
+        - name: OSS_AK_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: oss-ak-secret
+              key: akSecret
+      volumeMounts:
+        - name: bench
+          mountPath: /bench
+        - name: scripts
+          mountPath: /scripts
+      resources:
+        requests:
+          cpu: "500m"
+          memory: 1Gi
+  volumes:
+    - name: bench
+      hostPath:
+        path: /root/bench
+        type: Directory
+    - name: scripts
+      configMap:
+        name: ds-upload-script
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ds-upload-script
+  namespace: st-compress
+data:
+  up.sh: |
+    #!/bin/bash
+    set -e
+    echo "=== bench size ==="
+    du -sh /bench/* 2>/dev/null || true
+    python3 -c "import oss2" 2>/dev/null || pip install -q oss2
+    python3 /scripts/up.py
+    echo "UPLOAD DONE"
+  up.py: |
+    import os
+    import oss2
+
+    ak = os.environ["OSS_AK_ID"]
+    sk = os.environ["OSS_AK_SECRET"]
+    endpoint = "https://oss-cn-shanghai.aliyuncs.com"
+    bucket = oss2.Bucket(oss2.Auth(ak, sk), endpoint, "test-llm-compressor")
+
+    src_root = "/bench"
+    prefix = "benchmark_hf_cache/"
+    n = 0
+    for root, _dirs, files in os.walk(src_root):
+        for f in files:
+            local = os.path.join(root, f)
+            rel = os.path.relpath(local, src_root)
+            key = prefix + rel.replace(os.sep, "/")
+            bucket.put_object_from_file(key, local)
+            n += 1
+            if n % 100 == 0:
+                print("uploaded", n, "files", flush=True)
+    print("TOTAL uploaded", n, "files", flush=True)

@@ -1,0 +1,43 @@
+{
+  "label": "gptq__w4a16__linall",
+  "model_path": "/output/gptq__w4a16__linall/model",
+  "status": "ok",
+  "backend": "vllm",
+  "tasks_requested": [
+    "arc_easy",
+    "hellaswag"
+  ],
+  "fewshot": {
+    "arc_easy": 25,
+    "hellaswag": 10
+  },
+  "limit": 100.0,
+  "batch_size": "auto",
+  "max_model_len": 4096,
+  "dtype": "auto",
+  "results": {
+    "hellaswag": {
+      "metrics": {
+        "sample_len": 100,
+        "acc,none": 0.4,
+        "acc_stderr,none": 0.0492365963917331,
+        "acc_norm,none": 0.5,
+        "acc_norm_stderr,none": 0.050251890762960605
+      },
+      "primary_metric": "acc_norm,none",
+      "primary_value": 0.5
+    },
+    "arc_easy": {
+      "metrics": {
+        "sample_len": 100,
+        "acc,none": 0.68,
+        "acc_stderr,none": 0.046882617226215076,
+        "acc_norm,none": 0.7,
+        "acc_norm_stderr,none": 0.04605661864718383
+      },
+      "primary_metric": "acc_norm,none",
+      "primary_value": 0.7
+    }
+  },
+  "elapsed_sec": 353.8
+}

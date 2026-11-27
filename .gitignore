@@ -16,3 +16,14 @@ jobs_generated.yaml
 # 本地缓存
 .cache/
 tmp/
+# 量化产物模型文件（在 OSS 与本地 results/，不进 git）
+results/**/model/
+results/**/*.safetensors
+results/**/tokenizer.json
+results/**/vocab.json
+results/**/merges.txt
+results/**/lm_eval_raw/
+results/pod_logs/
+logs/
+results/oss_output/stage3.1-smoke/
+results/oss_output/stage3_0_test/

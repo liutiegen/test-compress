@@ -1,0 +1,43 @@
+{
+  "label": "baseline",
+  "model_path": "/data/Qwen2.5-0.5B-Instruct",
+  "status": "ok",
+  "backend": "vllm",
+  "tasks_requested": [
+    "arc_easy",
+    "hellaswag"
+  ],
+  "fewshot": {
+    "arc_easy": 25,
+    "hellaswag": 10
+  },
+  "limit": 100.0,
+  "batch_size": "auto",
+  "max_model_len": 4096,
+  "dtype": "auto",
+  "results": {
+    "hellaswag": {
+      "metrics": {
+        "sample_len": 100,
+        "acc,none": 0.41,
+        "acc_stderr,none": 0.04943110704237104,
+        "acc_norm,none": 0.5,
+        "acc_norm_stderr,none": 0.050251890762960605
+      },
+      "primary_metric": "acc_norm,none",
+      "primary_value": 0.5
+    },
+    "arc_easy": {
+      "metrics": {
+        "sample_len": 100,
+        "acc,none": 0.64,
+        "acc_stderr,none": 0.048241815132442176,
+        "acc_norm,none": 0.68,
+        "acc_norm_stderr,none": 0.046882617226215076
+      },
+      "primary_metric": "acc_norm,none",
+      "primary_value": 0.68
+    }
+  },
+  "elapsed_sec": 418.5
+}

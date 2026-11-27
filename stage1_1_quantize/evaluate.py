@@ -82,7 +82,10 @@ def main() -> int:
     ap.add_argument("--batch-size", default="auto")
     ap.add_argument("--max-model-len", type=int, default=4096)
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.85)
-    ap.add_argument("--dtype", default="bfloat16")
+    ap.add_argument("--dtype", default="auto",
+                    help="vLLM dtype。默认 auto 让 vLLM 按 GPU 自动选："
+                         "T4/V100 等 sm<80 的老卡不支持 bfloat16，"
+                         "auto 会退回 float16；写死 bfloat16 会在 sm75 上直接崩。")
     ap.add_argument("--quantization", default=None,
                     help="传给 vLLM 的 quantization，compressed-tensors 一般留空自动探测")
     ap.add_argument("--seed", type=int, default=1234)
