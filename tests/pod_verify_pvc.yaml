@@ -1,0 +1,47 @@
+# 生产 PVC 的挂载验证 Pod（st-compress 命名空间）
+# 验证的是 pvc_stage_1_1.yaml 里真实的 stage-1-1 两个 claim，
+# 而不是之前临时测试用的 default 命名空间 claim。
+apiVersion: v1
+kind: Pod
+metadata:
+  name: verify-pvc
+  namespace: st-compress
+spec:
+  restartPolicy: Never
+  imagePullSecrets:
+    - name: acr-cred
+  containers:
+    - name: check
+      image: test-acr-business-registry.cn-shanghai.cr.aliyuncs.com/test-llm-compressor/test:vllm-v0.34.0-base
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -e
+          echo "=== 输入卷（模型）==="
+          ls /data/Qwen2.5-0.5B-Instruct/config.json
+          head -3 /data/Qwen2.5-0.5B-Instruct/config.json
+          echo "=== 输入卷（数据集）==="
+          ls /data/ultrachat_200k/data/*.parquet | head -3
+          echo "=== 输出卷可写性 ==="
+          mkdir -p /output/_probe
+          echo "probe-$(date +%s)" > /output/_probe/write_test.txt
+          cat /output/_probe/write_test.txt
+          rm -rf /output/_probe
+          echo "=== 输出卷内容 ==="
+          ls /output/ | head
+          echo "VERIFY_OK"
+      volumeMounts:
+        - name: input
+          mountPath: /data
+          readOnly: true
+        - name: output
+          mountPath: /output
+  volumes:
+    - name: input
+      persistentVolumeClaim:
+        claimName: pvc-stage-1-1-input
+        readOnly: true
+    - name: output
+      persistentVolumeClaim:
+        claimName: pvc-stage-1-1-quant

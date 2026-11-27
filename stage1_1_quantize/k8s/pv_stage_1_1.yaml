@@ -1,0 +1,119 @@
+# PV —— OSS CSI（**公网 endpoint 方案**）
+#
+# 为什么用公网而不是内网：
+#   集群在 cn-qingdao（c100027250...），bucket test-llm-compressor 在 cn-shanghai。
+#   内网 endpoint oss-cn-shanghai-internal 只能从 shanghai 的 VPC 内解析，
+#   跨地域不可达。已实测并确认：
+#     - 公网 endpoint 可挂载、可读、内容正确
+#     - 读速约 893 kB/s（多 Pod 并行时会被摊薄）
+#   这是本方案已知的性能代价，已经用户确认接受。
+#
+# 实测踩过并已规避的三个坑：
+#   1. ossfs2 **不支持** authType: accessKey → 去掉 fuseType 走 ossfs 1.0
+#   2. close_to_open 是 ossfs2 专有参数，ossfs 1.0 会报
+#      "fuse: unknown option `close_to_open=false'" → 必须移除
+#   3. 集群无出网到 docker.io，镜像必须来自 ACR + imagePullSecrets
+#
+# 凭证：AK Secret（nodePublishSecretRef）。
+#   RRSA 角色 rrsa 的信任策略绑的是已删除的 cf6b1acd 集群，本集群未开 RRSA，
+#   故暂用 AK 打通链路。生产化时应给本集群开 RRSA 后再改回 authType: rrsa。
+#
+# volumeHandle 必须全局唯一；path 不同就要给不同 handle，
+# 否则 CSI 会复用同一 mount pod，一方卸载会让另一方读挂。
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: st-compress
+---
+# oss-ak-secret 不在仓库里定义 —— 凭证绝不入库。
+# 部署前用以下命令在集群内创建（值从 /root/.ossutilconfig 读取）：
+#
+#   kubectl create secret generic oss-ak-secret -n st-compress \
+#     --from-literal=akId="$OSS_AK_ID" \
+#     --from-literal=akSecret="$OSS_AK_SECRET"
+#
+# 更好的做法是给集群开 RRSA，改用 authType: rrsa + roleName，
+# 彻底消除静态 AK。本集群当前未开 RRSA，故用 Secret 过渡。
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: oss-fuse-public
+provisioner: ossplugin.csi.alibabacloud.com
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+---
+# 输入侧：只读挂载整个 bucket（模型 + 数据集）
+#   注意 path: / 意味着 Pod 里能看到 bucket 根，模型在 /data/Qwen2.5-0.5B-Instruct
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-compress-input
+  labels:
+    app.kubernetes.io/part-of: llm-compressor
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: oss-fuse-public
+  mountOptions:
+    - allow_other
+  csi:
+    driver: ossplugin.csi.alibabacloud.com
+    volumeHandle: pv-compress-input-qingdao-v1
+    volumeAttributes:
+      bucket: test-llm-compressor
+      region: cn-shanghai
+      path: /
+      url: "https://oss-cn-shanghai.aliyuncs.com"
+      # 只保留 ossfs 1.0 认得的参数
+      otherOpts: "-o max_stat_cache_size=100000 -o allow_other"
+      authType: "accessKey"
+      sigVersion: "v4"
+    nodePublishSecretRef:
+      name: oss-ak-secret
+      namespace: st-compress
+---
+# 输出侧：可读写，必须独立 PV（ReadOnlyMany 不能写）
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-compress-output
+  labels:
+    app.kubernetes.io/part-of: llm-compressor
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: oss-fuse-public
+  mountOptions:
+    - allow_other
+  csi:
+    driver: ossplugin.csi.alibabacloud.com
+    volumeHandle: pv-compress-output-qingdao-v1
+    volumeAttributes:
+      bucket: test-llm-compressor
+      region: cn-shanghai
+      path: /output
+      url: "https://oss-cn-shanghai.aliyuncs.com"
+      otherOpts: "-o max_stat_cache_size=100000 -o allow_other"
+      authType: "accessKey"
+      sigVersion: "v4"
+    nodePublishSecretRef:
+      name: oss-ak-secret
+      namespace: st-compress
+---
+# acr-cred 也不入库。部署前创建：
+#
+#   kubectl create secret docker-registry acr-cred -n st-compress \
+#     --docker-server=<registry> \
+#     --docker-username=<user> \
+#     --docker-password=<password>
+#
+# 务必用这条命令而不是手写 base64 —— 手工拼接的 auth 字段
+# 用户名极易写错，表现为 kubelet 报 401 Unauthorized。

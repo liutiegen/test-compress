@@ -1,0 +1,101 @@
+# stage1.1 并行量化 + 评估（Job 模板）
+#
+# 为什么用 Job 而不是 Deployment：
+#   量化是 run-to-completion 任务。Deployment 会在 Pod 退出后无限重启，
+#   同一组合被反复执行、把 OSS 输出写花。Job 才有明确的"完成/失败"语义，
+#   也便于 stage3 用 kubectl wait --for=condition=complete 判定。
+#
+# 并行：每个变体一个独立 Job（由 tools/gen_jobs.py 生成），
+#   而不是单个 Job 内部循环 —— 每个变体需要独立 GPU 配额与失败隔离。
+#
+# 镜像 tag 必须与 stage2 构建产物严格一致，生成器保证。
+#
+# 注意：本集群未开通 RRSA（原 rrsa 角色绑的是已删除的 cf6b1acd 集群），
+# OSS 凭证走 AK Secret（nodePublishSecretRef），故不指定 serviceAccountName。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: quant-JOBID
+  namespace: st-compress
+  labels:
+    app: quant
+    matrix-id: MATRIXID
+spec:
+  backoffLimit: 0          # 失败即停，不掩盖真实错误
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: quant
+        matrix-id: MATRIXID
+    spec:
+      restartPolicy: Never
+      # 集群无法访问 docker.io，镜像只来自 ACR
+      imagePullSecrets:
+        - name: acr-cred
+      nodeSelector:
+        kubernetes.io/os: linux
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: quant
+          image: IMAGE_PLACEHOLDER
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SUBCOMMAND
+              value: quant_eval
+            - name: MATRIX_ID
+              value: MATRIXID
+            - name: ALGORITHM
+              value: ALGORITHM_PLACEHOLDER
+            - name: SCHEME
+              value: SCHEME_PLACEHOLDER
+            - name: TARGET
+              value: TARGET_PLACEHOLDER
+            # 与 pvc-compress-input 的 path: / 对齐（bucket 根挂到 /data）
+            - name: MODEL_PATH
+              value: /data/Qwen2.5-0.5B-Instruct
+            - name: DATASET_PATH
+              value: /data/ultrachat_200k
+            - name: OUTPUT_ROOT
+              value: /output
+            # 公网 OSS 读速约 893 kB/s，校准样本过多会被 IO 拖死
+            - name: NUM_CALIBRATION_SAMPLES
+              value: "128"
+            - name: MAX_SEQ_LENGTH
+              value: "1024"
+            - name: EVAL_LIMIT
+              value: "100"     # 冒烟阶段限量；正式跑改成 ""
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              cpu: "8"
+              memory: 40Gi
+            requests:
+              nvidia.com/gpu: 1
+              cpu: "6"
+              memory: 28Gi
+          volumeMounts:
+            - name: input
+              mountPath: /data
+              readOnly: true
+            - name: output
+              mountPath: /output
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: input
+          persistentVolumeClaim:
+            claimName: pvc-stage-1-1-input
+            readOnly: true
+        - name: output
+          persistentVolumeClaim:
+            claimName: pvc-stage-1-1-quant
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Gi

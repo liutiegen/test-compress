@@ -1,0 +1,36 @@
+# PVC 是唯一的 claim 定义处（每个 PV 只能绑一个 PVC，
+# 所以不要把同一 PV 再绑到别的 claim 上，否则后绑的会一直 Pending）。
+#
+# 命名用 stage 前缀，让 deployment 引用时语义清晰：
+#   pvc-stage-1-1-input  -> pv-compress-input   (只读, 模型+数据集)
+#   pvc-stage-1-1-quant  -> pv-compress-output  (读写, 量化产物+指标)
+#
+# apply 顺序：先 pv_stage_1_1.yaml（含 PV/SC/Secret），再本文件。
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-stage-1-1-input
+  namespace: st-compress
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: oss-fuse-public
+  volumeName: pv-compress-input
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-stage-1-1-quant
+  namespace: st-compress
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: oss-fuse-public
+  volumeName: pv-compress-output
+  resources:
+    requests:
+      storage: 100Gi

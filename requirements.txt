@@ -1,0 +1,25 @@
+# 依赖版本窗口的单一事实来源
+#
+# 这三个框架的 transformers 约束必须求交集，否则 pip 会解出一组
+# 互相不兼容的版本（实测教训）：
+#
+#   vllm v0.34.1        : transformers >= 5.16.1, < 5.25.0
+#   llmcompressor 0.15.0: transformers >= 5.15.0, <= 5.21.0   <- 更严
+#   trl 1.18.0          : 无强约束
+#
+#   => 交集 = [5.16.1, 5.21.0]，Dockerfile 钉 5.21.0
+#
+# torch 也必须钉：llmcompressor 允许 2.10.0~2.14.1，但 pip 默认会解到
+# 最新版并连带拉 CUDA 13 的 cuda-toolkit，与 base 镜像的 CUDA 12.8 不同线。
+# 因此 base 镜像自带的 torch 不覆盖，只在需要时显式钉 cu128 轮子。
+
+transformers==5.21.0
+compressed-tensors==0.20.1
+llmcompressor==0.15.0
+trl==1.18.0
+accelerate>=1.15.0
+datasets>=4.8.4
+safetensors>=0.6.2
+
+# 运行时只读本地挂载，禁止联网
+# （由 Dockerfile 里的 HF_HUB_OFFLINE 等环境变量强制）

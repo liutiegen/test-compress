@@ -1,0 +1,18 @@
+# 绝不提交的运行时产物与凭证
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# 构建产物
+jobs_generated.yaml
+*.log
+
+# 严禁提交密钥
+*.pem
+*secret*.yaml
+!pv_stage_1_1.yaml   # 该文件含 OSS AK，但已按需求内联；生产应改用 RRSA
+
+# 本地缓存
+.cache/
+tmp/
