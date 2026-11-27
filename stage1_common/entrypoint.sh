@@ -37,7 +37,7 @@ fi
 rm -f "$OUTPUT_ROOT/$MATRIX_ID/.write_test"
 
 log "GPU 信息:"
-python - <<'PY' || log "WARNING: 无法读取 GPU 信息"
+python3 - <<'PY' || log "WARNING: 无法读取 GPU 信息"
 import torch
 print("cuda available:", torch.cuda.is_available())
 if torch.cuda.is_available():
@@ -52,7 +52,7 @@ RUN_DIR="$OUTPUT_ROOT/$MATRIX_ID"
 case "$SUBCOMMAND" in
   quant_eval)
     log "=== 阶段1: 量化 ==="
-    python /workspace/stage1_1_quantize/quantize.py \
+    python3 /workspace/stage1_1_quantize/quantize.py \
       --model-path "$MODEL_PATH" \
       --dataset-path "$DATASET_PATH" \
       --output-dir "$RUN_DIR/model" \
@@ -63,7 +63,7 @@ case "$SUBCOMMAND" in
       --num-calibration-samples "${NUM_CALIBRATION_SAMPLES:-256}" \
       --max-seq-length "${MAX_SEQ_LENGTH:-2048}"
     log "=== 阶段2: 评估量化模型 ==="
-    python /workspace/stage1_1_quantize/evaluate.py \
+    python3 /workspace/stage1_1_quantize/evaluate.py \
       --model-path "$RUN_DIR/model" \
       --output-dir "$RUN_DIR" \
       --label "$MATRIX_ID" \
@@ -73,7 +73,7 @@ case "$SUBCOMMAND" in
 
   eval_only)
     log "=== 仅评估（用于 baseline / finetuned） ==="
-    python /workspace/stage1_1_quantize/evaluate.py \
+    python3 /workspace/stage1_1_quantize/evaluate.py \
       --model-path "${EVAL_MODEL_PATH:-$MODEL_PATH}" \
       --output-dir "$RUN_DIR" \
       --label "$MATRIX_ID" \
@@ -82,7 +82,7 @@ case "$SUBCOMMAND" in
 
   finetune)
     log "=== QAD 微调 ==="
-    python /workspace/stage1_2_finetune/finetune_qad.py \
+    python3 /workspace/stage1_2_finetune/finetune_qad.py \
       --model-path "${QUANT_MODEL_PATH:?QUANT_MODEL_PATH required}" \
       --dataset-path "$DATASET_PATH" \
       --output-dir "$RUN_DIR/model" \
@@ -91,7 +91,7 @@ case "$SUBCOMMAND" in
       --lr "${FT_LR:-2e-6}" \
       --num-samples "${FT_SAMPLES:-512}"
     log "=== 评估微调后模型 ==="
-    python /workspace/stage1_1_quantize/evaluate.py \
+    python3 /workspace/stage1_1_quantize/evaluate.py \
       --model-path "$RUN_DIR/model" \
       --output-dir "$RUN_DIR" \
       --label "$MATRIX_ID" \

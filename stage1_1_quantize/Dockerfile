@@ -36,7 +36,7 @@ RUN pip install --no-cache-dir \
         "compressed-tensors==0.20.1" \
     && pip install --no-cache-dir \
         "llmcompressor==${LLMCOMPRESSOR_VERSION}" \
-    && python -c "import transformers, llmcompressor, compressed_tensors, vllm; \
+    && python3 -c "import transformers, llmcompressor, compressed_tensors, vllm; \
 print('transformers', transformers.__version__); \
 print('llmcompressor', llmcompressor.__version__); \
 print('compressed_tensors', compressed_tensors.__version__); \
@@ -53,7 +53,7 @@ COPY stage1_1_quantize/ /workspace/stage1_1_quantize/
 COPY tools/ /workspace/tools/
 COPY stage1_common/ /workspace/stage1_common/
 
-RUN python -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
+RUN python3 -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
         /workspace/stage1_1_quantize/quantize.py \
         /workspace/stage1_1_quantize/evaluate.py \
         /workspace/stage1_1_quantize/select_best.py \

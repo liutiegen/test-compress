@@ -24,7 +24,7 @@ COPY stage1_1_quantize/ /workspace/stage1_1_quantize/
 COPY stage1_3_evaluate/ /workspace/stage1_3_evaluate/
 COPY tools/ /workspace/tools/
 
-RUN python -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
+RUN python3 -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
         /workspace/stage1_1_quantize/evaluate.py
 
 RUN chmod +x /workspace/stage1_3_evaluate/compare_all.sh

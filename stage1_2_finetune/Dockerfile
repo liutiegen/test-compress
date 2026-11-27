@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir \
     && pip install --no-cache-dir \
         "llmcompressor==${LLMCOMPRESSOR_VERSION}" \
         "trl==${TRL_VERSION}" \
-    && python -c "import transformers, llmcompressor, trl; \
+    && python3 -c "import transformers, llmcompressor, trl; \
 print('transformers', transformers.__version__); \
 print('llmcompressor', llmcompressor.__version__); \
 print('trl', trl.__version__)"
@@ -38,7 +38,7 @@ COPY stage1_1_quantize/evaluate.py /workspace/stage1_1_quantize/evaluate.py
 COPY tools/ /workspace/tools/
 COPY stage1_common/ /workspace/stage1_common/
 
-RUN python -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
+RUN python3 -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
         /workspace/stage1_2_finetune/finetune_qad.py \
         /workspace/stage1_1_quantize/matrix.py
 
