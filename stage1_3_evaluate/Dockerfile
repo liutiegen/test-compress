@@ -2,7 +2,7 @@
 #
 # 与 1.1/1.2 共用 base；这里只需要 vLLM + lm-eval（不需要 llmcompressor，
 # 因为评估是对已量化好的产物做推理，不是再量化）。
-ARG BASE_IMAGE=test-acr-business-registry.cn-shanghai.cr.aliyuncs.com/test-llm-compressor/test:vllm-v0.34.0-base
+ARG BASE_IMAGE=test-acr-business-registry-vpc.cn-shanghai.cr.aliyuncs.com/test-llm-compressor/test:vllm-v0.34.0-base
 FROM ${BASE_IMAGE}
 
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple/

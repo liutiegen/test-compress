@@ -4,7 +4,7 @@
 #   stage1.1 需要能"跑量化"（llmcompressor + GPTQ/AWQ/SmoothQuant）
 #   stage1.2 需要能"跑训练"（trl + accelerate + QAD 的反向传播）
 # 两者依赖窗口一致，因此 FROM 同一个 base，只额外补 trl。
-ARG BASE_IMAGE=test-acr-business-registry.cn-shanghai.cr.aliyuncs.com/test-llm-compressor/test:vllm-v0.34.0-base
+ARG BASE_IMAGE=test-acr-business-registry-vpc.cn-shanghai.cr.aliyuncs.com/test-llm-compressor/test:vllm-v0.34.0-base
 FROM ${BASE_IMAGE}
 
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple/
