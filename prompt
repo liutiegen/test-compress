@@ -1,0 +1,1007 @@
+- **核心要求**
+    - 通用规则
+        1. **一定要先把整个prompt文件读完**
+        2. 做一个专业的企业级别的模型量化项目
+        3. 严格按照“工作流”执行，工作流采用模板方法模式和策略模式的思想，工作流所需要的相关信息从“config”和”strategy”里找
+        4. 所有的校验检查要生成清单
+        5. 要记录执行日志
+        6. 若前置条件不满足，或验证不通过，则暂停要求用户审核处理，以及任何异常情况发生，都暂停要求用户处理
+    - 具体要求
+        1. 微调一个模型，使得他在指定类型任务上的表现有所提升，比较微调前后性能
+- agent运行环境需要的脚本
+    - `Find-LastValidOffset.sh`
+        - `Find-LastValidOffset.sh`
+            
+            ```bash
+            #!/usr/bin/env bash
+            set -euo pipefail
+            
+            # Usage:
+            # Find-LastValidOffset.sh --InstanceId xxx --RepoId xxx --BuildRecordId xxx [--Region cn-shanghai] [--PageSize 100] [--StartOffset 0]
+            
+            InstanceId=""
+            RepoId=""
+            BuildRecordId=""
+            Region="cn-shanghai"
+            PageSize=100
+            StartOffset=0
+            
+            # Parse arguments
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --InstanceId)
+                        InstanceId="$2"
+                        shift 2
+                        ;;
+                    --RepoId)
+                        RepoId="$2"
+                        shift 2
+                        ;;
+                    --BuildRecordId)
+                        BuildRecordId="$2"
+                        shift 2
+                        ;;
+                    --Region)
+                        Region="$2"
+                        shift 2
+                        ;;
+                    --PageSize)
+                        PageSize="$2"
+                        shift 2
+                        ;;
+                    --StartOffset)
+                        StartOffset="$2"
+                        shift 2
+                        ;;
+                    *)
+                        echo "Unknown argument: $1" >&2
+                        exit 1
+                        ;;
+                esac
+            done
+            
+            # Check mandatory params
+            if [[ -z "$InstanceId" || -z "$RepoId" || -z "$BuildRecordId" ]]; then
+                cat >&2 <<EOF
+            Missing mandatory parameters!
+            Required: --InstanceId --RepoId --BuildRecordId
+            Optional: --Region --PageSize --StartOffset
+            EOF
+                exit 1
+            fi
+            
+            currentOffset="$StartOffset"
+            lastValidOffset=""
+            totalLines=0
+            
+            while true; do
+                echo -e "\033[36m>>> Query offset = $currentOffset\033[0m"
+            
+                # Call aliyun cli, get json, extract TotalCount with jq
+                cliResult=$(aliyun cr list-repo-build-record-log \
+                    --instance-id "$InstanceId" \
+                    --repo-id "$RepoId" \
+                    --build-record-id "$BuildRecordId" \
+                    --offset "$currentOffset" \
+                    --region "$Region")
+            
+                pageCount=$(echo "$cliResult" | jq -r '.TotalCount')
+                echo "    Records on this page: $pageCount"
+            
+                if [[ "$pageCount" -le 0 ]]; then
+                    echo -e "\n\033[33m[STOP] Empty page received.\033[0m"
+                    break
+                fi
+            
+                lastValidOffset="$currentOffset"
+                totalLines=$(( totalLines + pageCount ))
+                currentOffset=$(( currentOffset + PageSize ))
+            done
+            
+            echo -e "\n\033[32m=== Result ===\033[0m"
+            if [[ -n "$lastValidOffset" ]]; then
+                echo "Last valid offset (n): $lastValidOffset"
+                echo "Total log lines: $totalLines"
+            else
+                echo "No log records found."
+                echo "Total log lines: 0"
+            fi
+            
+            ```
+            
+    - `RunCommandUntilOutput.sh`
+        - prompt
+            
+            现有`aliyun cr get-artifact-subscription-task --instance-id ... --task-id ... --region ...`命令，执行结果可能为：
+            
+            1. 输出内容中某行有"TaskStatus": "COMPLETED"，且另外一行有"TaskResult"
+            2. 输出内容中某行有"TaskStatus": "yyy"（yyy不是COMPLETED），且输出内容中不存在"TaskResult"
+            
+            现在给出一个shell脚本，用于反复执行上述命令并轮询，直到出现特定的输出内容（情况1），然后返回这次执行命令的完整结果
+            
+            要求脚本用法为`RunCommandUntilOutput.ps1 --pre-command … --pre-script ... --repeat-command … --condition ... --repeat-script ... --post-command … --post-script ... --poll-interval … --max-time …`，从而可以被后续迁移到其他的命令。
+            
+            其中repeat-command和repeat-script是需要被反复执行的命令，condition是判停的条件，pre-command和pre-script是在执行repeat-command之前要执行的操作，post-command和post-script是在执行repeat-comand之后要执行的操作，poll-interval是轮询的时间间隔，max-time是整个脚本的最大执行时长
+            
+        - `RunCommandUntilOutput.sh`
+            
+            ```bash
+            #!/usr/bin/env bash
+            set -uo pipefail
+            
+            # 解析 --key value 参数
+            declare -A parsed=()
+            raw_args=("$@")
+            i=0
+            while [[ $i -lt ${#raw_args[@]} ]]; do
+                arg="${raw_args[$i]}"
+                if [[ "$arg" =~ ^--(.+)$ ]]; then
+                    key="${BASH_REMATCH[1]}"
+                    ((i++))
+                    if [[ $i -lt ${#raw_args[@]} ]]; then
+                        parsed["$key"]="${raw_args[$i]}"
+                    else
+                        parsed["$key"]=""
+                    fi
+                fi
+                ((i++))
+            done
+            
+            # 提取参数
+            pre_command="${parsed[pre-command]-}"
+            pre_script="${parsed[pre-script]-}"
+            repeat_command="${parsed[repeat-command]-}"
+            repeat_script="${parsed[repeat-script]-}"
+            condition_code="${parsed[condition]-}"
+            post_command="${parsed[post-command]-}"
+            post_script="${parsed[post-script]-}"
+            poll_interval="${parsed[poll-interval]:-2.0}"
+            max_time="${parsed[max-time]:-300.0}"
+            
+            # 必填校验
+            if [[ -z "$condition_code" ]]; then
+                echo "ERROR: 必须指定 --condition" >&2
+                exit 1
+            fi
+            if [[ -z "$repeat_command" && -z "$repeat_script" ]]; then
+                echo "ERROR: 必须指定 --repeat-command 或者 --repeat-script" >&2
+                exit 1
+            fi
+            
+            start_at=$(date +%s.%N)
+            lastOutput=""
+            
+            # 前置逻辑，只执行一次
+            if [[ -n "$pre_script" ]]; then
+                echo "VERBOSE: 执行 pre-script" >&2
+                eval -- "$pre_script"
+            fi
+            if [[ -n "$pre_command" ]]; then
+                echo "VERBOSE: 执行 pre-command: $pre_command" >&2
+                eval -- "$pre_command" >/dev/null
+            fi
+            
+            while true; do
+                # 执行轮询主体，捕获 stdout+stderr
+                if [[ -n "$repeat_script" ]]; then
+                    echo "VERBOSE: 执行 repeat-script" >&2
+                    lastOutput=$(eval -- "$repeat_script" 2>&1)
+                else
+                    echo "VERBOSE: 执行 repeat-command: $repeat_command" >&2
+                    lastOutput=$(eval -- "$repeat_command" 2>&1)
+                fi
+            
+                # condition 单独捕获返回码，不受 set -e 影响
+                set +e
+                eval -- "$condition_code"
+                cond_rc=$?
+                set -u
+            
+                if [[ $cond_rc -eq 0 ]]; then
+                    echo "VERBOSE: 条件满足，准备执行后置逻辑" >&2
+                    if [[ -n "$post_script" ]]; then
+                        eval -- "$post_script"
+                    fi
+                    if [[ -n "$post_command" ]]; then
+                        eval -- "$post_command" >/dev/null
+                    fi
+                    echo "$lastOutput"
+                    exit 0
+                fi
+            
+                # 超时判断
+                now=$(date +%s.%N)
+                elapsed=$(echo "$now - $start_at" | bc -l)
+                if (( $(echo "$elapsed >= $max_time" | bc -l) )); then
+                    echo "ERROR: 轮询超时（max-time=$max_time s），已退出。最后一次输出：" >&2
+                    echo "$lastOutput" >&2
+                    exit 2
+                fi
+            
+                sleep "$poll_interval"
+            done
+            
+            ```
+            
+        - 用法
+            - 轮询base镜像拉取情况
+                
+                ```powershell
+                RunCommandUntilOutput.sh \
+                --repeat-command 'aliyun cr get-artifact-subscription-task --instance-id ... --region ... --task-id ...' \
+                --poll-interval 60 \
+                --max-time 20000 \
+                --condition 'echo "$lastOutput" | grep -q "\"TaskStatus\": \"COMPLETED\"" && echo "$lastOutput" | grep -q "\"TaskResult\":"'
+                ```
+                
+            - 轮询镜像构建情况
+                
+                ```powershell
+                RunCommandUntilOutput.ps1 `
+                --repeat-command "aliyun cr get-repo-build-record-status --instance-id xxx --repo-id xxx --build-record-id xxx --region cn-shanghai" `
+                --condition '$obj = $lastOutput | ConvertFrom-Json -ErrorAction SilentlyContinue; $obj -and ($obj.BuildStatus -eq "SUCCESS" -or $obj.BuildStatus -eq "FAILED")' `
+                --poll-interval 60 `
+                --max-time 20000
+                ```
+                
+    - `WaitTask.sh`
+        - prompt
+            
+            现有`aliyun cs describe-task-info --task-id xxx --region xxx`命令，执行结果可能为：
+            
+            1. 输出内容中某行有"state": "running"
+            2. 输出内容中某行有"state": "failed"
+            3. 输出内容中某行有"state": "success"
+            
+            现在给出一个shell脚本，用于反复执行上述命令并轮询，直到出现特定的输出内容（情况2或者情况3），然后返回这次执行命令的完整结果
+            
+            要求脚本用法为`WaitTask.sh --repeat-command … --condition ... --poll-interval … --max-time …`，从而可以被后续迁移到其他的命令。
+            
+            其中repeat-command是需要被反复执行的命令，condition是判停的条件，poll-interval是轮询的时间间隔，max-time是整个脚本的最大执行时长
+            
+        - 脚本
+            
+            ```bash
+            #!/usr/bin/env bash
+            set -euo pipefail
+            
+            REPEAT_COMMAND=""
+            CONDITION=""
+            POLL_INTERVAL=5
+            MAX_TIME=300
+            START_TS=$(date +%s)
+            
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --repeat-command)
+                        REPEAT_COMMAND="$2"
+                        shift 2
+                        ;;
+                    --condition)
+                        CONDITION="$2"
+                        shift 2
+                        ;;
+                    --poll-interval)
+                        POLL_INTERVAL="$2"
+                        shift 2
+                        ;;
+                    --max-time)
+                        MAX_TIME="$2"
+                        shift 2
+                        ;;
+                    *)
+                        echo "ERROR: unknown argument: $1" >&2
+                        echo "Usage: $0 --repeat-command <cmd> --condition <extended-regex> [--poll-interval <sec>] [--max-time <sec>]" >&2
+                        exit 1
+                        ;;
+                esac
+            done
+            
+            if [[ -z "${REPEAT_COMMAND}" || -z "${CONDITION}" ]]; then
+                echo "ERROR: --repeat-command and --condition are required" >&2
+                echo "Usage: $0 --repeat-command <cmd> --condition <extended-regex> [--poll-interval <sec>] [--max-time <sec>]" >&2
+                exit 1
+            fi
+            
+            while true; do
+                NOW_TS=$(date +%s)
+                ELAPSED=$(( NOW_TS - START_TS ))
+            
+                if [[ ${ELAPSED} -ge ${MAX_TIME} ]]; then
+                    echo "ERROR: timeout after ${MAX_TIME}s, regex condition [${CONDITION}] not matched" >&2
+                    exit 2
+                fi
+            
+                CMD_OUT=$(eval "${REPEAT_COMMAND}")
+            
+                # -E 开启扩展正则
+                if echo "${CMD_OUT}" | grep -qE -- "${CONDITION}"; then
+                    echo "${CMD_OUT}"
+                    exit 0
+                fi
+            
+                sleep "${POLL_INTERVAL}"
+            done
+            
+            ```
+            
+        - 用法
+            
+            ```bash
+            WaitTask.sh \
+              --repeat-command 'aliyun cs describe-task-info --task-id T-6b0427b26ae3a00109001c2f--region cn-shanghai' \
+              --condition '"state": "failed"|"state": "success"' \
+              --poll-interval 30 \
+              --max-time 3000
+            ```
+            
+- Skills
+    - aliyun操作
+        - aliyun拉取base镜像到ACR的cli操作
+            - **拉取base镜像到ACR的流程是？**
+                1. 列举已有的制品订阅规则，选择某个已有规则更新
+                2. 根据已有的制品订阅规则创建制品订阅任务
+                3. 后台等待该制品订阅任务执行结束，成功则进入下一步，失败则告警等待人工处理
+                - 注：不能直接创建制品规则，只能修改现有制品规则
+                    
+                    由于制品规则的创建不能直接指定自定义的镜像源，所以用户会提前提供若干个制品订阅规则以供查看，然后根据情况更新现有制品规则
+                    
+                    列举已有制品订阅规则时的SourceDomain字段就是源registry，如果已有的registry都不满足则暂停请求人工处理
+                    
+            - 列举已有的制品订阅规则
+                
+                `aliyun cr list-artifact-subscription-rule --instance-id ... --region ...`
+                
+            - 更新制品订阅规则
+                
+                `aliyun cr update-artifact-subscription-rule --rule-id <指定制品订阅规则的id> --source-namespace-name <source-namespace> --source-repo-name <source-repo> --instance-id <target-registry>的id --namespace-name <target-namespace> --repo-name <target-repo> --tag-regexp <base-tag> --tag-count 1 --override true --platform linux/amd64 --region ...`
+                
+            - 创建制品订阅任务
+                
+                `aliyun cr create-artifact-subscription-task --instance-id ... --rule-id ... --region ...`
+                
+                从返回信息中可以获知创建的任务的id（TaskId）
+                
+            - 查看指定制品订阅任务的运行情况
+                
+                `RunCommandUntilOutput.sh --repeat-command 'aliyun cr get-artifact-subscription-task --instance-id ... --task-id ... --region ...' --poll-interval 60 --max-time 20000 --condition 'echo "$lastOutput" | grep -q "\"TaskStatus\": \"COMPLETED\"" && echo "$lastOutput" | grep -q "\"TaskResult\":"'`
+                
+                若后台运行的结果中TaskStatus是COMPLETED且TaskResult是SUCCESS则表明镜像拉取成功，若不是SUCCESS则需要告警，等待人工处理
+                
+        - aliyun构建镜像到ACR的cli操作
+            - **构建镜像的流程**
+                1. 创建镜像构建规则
+                2. git push提交代码
+                3. 根据镜像构建规则构建镜像
+                4. 后台运行监控脚本，轮询该镜像构建的状态
+                5. 若构建成功则进入下一步，若构建失败则查看并分析日志，具体为先搞清楚整个日志有多少行，然后读取指定的若干行
+            - 创建镜像构建规则
+                
+                `aliyun cr create-repo-build-rule --instance-id <target-registry>的id --repo-id <target-repo>的id --dockerfile-location / --dockerfile-name <dockerfile的相对路径> --push-type GIT_BRANCH --push-name '分支名' --image-tag <target-tag> --build-args xxx=... yyy=... --platforms linux/amd64 --region ...`
+                
+                该命令会创建一个镜像构建规则，当后续根据该规则构建镜像时，会根据绑定的github项目上的对应dockerfile构建镜像，构建目标地址为<target-registry>/<target-namespace>(无需给出，直接由target-repo定位)/<target-repo>:<target-tag>
+                
+                返回的字段中有BuildRuleId
+                
+            - 根据镜像构建规则构建镜像
+                
+                `aliyun cr create-build-record-by-rule --instance-id ... --repo-id ... --build-rule-id ... --region ...`
+                
+            - 查看镜像构建的状态
+                
+                ```bash
+                RunCommandUntilOutput.sh \
+                --repeat-command 'aliyun cr get-repo-build-record-status --instance-id xxx --repo-id xxx --build-record-id xxx --region xxx' \
+                --poll-interval 60 \
+                --max-time 20000 \
+                --condition '[[ "$lastOutput" == *'"BuildStatus": "SUCCESS"'* || "$lastOutput" == *'"BuildStatus": "FAILED"'* ]]'
+                ```
+                
+                输出内容中的BuildStatus字段可能为FAILED, SUCCESS和…
+                
+            - 查询指定构建的日志总行数
+                
+                使用自定义脚本
+                
+                `Find-LastValidOffset.sh --InstanceId ... --RepoId ... --BuildRecordId ...`
+                
+            - 查看指定构建的日志的指定的100行
+                
+                `aliyun cr list-repo-build-record-log --instance-id ... --repo-id ... --build-record-id ... --offset ... --region ...`
+                
+        - aliyun查看当前账号可用余额
+            
+            aliyun bssopenapi query-account-balance
+            
+        - aliyun操纵ACK集群的操作
+            - 创建ACK集群
+                
+                ```yaml
+                aliyun cs POST /clusters \
+                --region ... \
+                --header "Content-Type=application/json" \
+                --body '{
+                    "name": "cluster-...",
+                    "cluster_type": "ManagedKubernetes",
+                    "kubernetes_version": "1.37.2-aliyun.1",
+                    "region_id": "...",
+                    "snat_entry": true,
+                    "endpoint_public_access": true,
+                    "deletion_protection": true,
+                    "proxy_mode": "ipvs",
+                    "profile": "Default",
+                    "cis_enable_risk_check": true,
+                    "timezone": "Asia/Shanghai",
+                    "addons": [
+                        {"name": "metrics-server"},
+                        {"name": "coredns"},
+                        {"name": "managed-security-inspector"},
+                        {"name": "ack-kubeskoop"},
+                        {
+                            "name": "terway-controlplane",
+                            "config": "{\"ENITrunking\":\"true\"}"
+                        },
+                        {
+                            "name": "terway-eniip",
+                            "config": "{\"IPVlan\":\"false\",\"NetworkPolicy\":\"false\",\"ENITrunking\":\"true\"}"
+                        },
+                        {"name": "csi-plugin"},
+                        {"name": "managed-csiprovisioner"},
+                        {
+                            "name": "storage-operator",
+                            "config": "{\"CnfsOssEnable\":\"false\",\"CnfsNasEnable\":\"false\"}"
+                        },
+                        {
+                            "name": "loongcollector",
+                            "config": "{\"IngressDashboardEnabled\":\"true\"}"
+                        },
+                        {
+                            "name": "ack-node-problem-detector",
+                            "config": "{\"sls_project_name\":\"\"}"
+                        },
+                        {
+                            "name": "nginx-ingress-controller",
+                            "disabled": true
+                        },
+                        {"name": "ack-node-local-dns"}
+                    ],
+                    "support_policy": "Standard",
+                    "cluster_spec": "ack.pro.small",
+                    "enable_rrsa": false,
+                    "zone_ids": [...],
+                    "service_cidr": "192.168.0.0/16",
+                    "ip_stack": "ipv4",
+                    "audit_log_config": {"enabled": true},
+                    "logging_type": "SLS",
+                    "service_account_issuer": "https://kubernetes.default.svc/",
+                    "api_audiences": "https://kubernetes.default.svc/",
+                    "is_enterprise_security_group": true,
+                    "maintenance_window": {"enable": false},
+                    "operation_policy": {
+                        "cluster_auto_upgrade": {
+                            "enabled": true,
+                            "channel": "stable"
+                        }
+                    },
+                    "controlplane_log_ttl": "30",
+                    "controlplane_log_components": [
+                        "apiserver",
+                        "kcm",
+                        "scheduler",
+                        "ccm",
+                        "controlplane-events",
+                        "alb"
+                    ]
+                }'
+                
+                ```
+                
+            - 获取kubeconfig并保存到~/.kube/config
+                
+                `aliyun cs describe-cluster-user-kubeconfig --cluster-id ... --private-ip-address false --region ... | jq -r ".config" > ~/.kube/config`
+                
+            - 删除ACK集群
+                1. 关闭集群的删除保护：`aliyun cs modify-cluster --cluster-id ... --deletion-protection false --region ...`
+                2. 实际删除集群：`aliyun cs delete-cluster --cluster-id ... --retain-all-resources false --keep-slb false --region ...`
+            - 创建节点池
+                
+                ```bash
+                aliyun cs POST /clusters/<ClusterId>/nodepools \
+                --region <region> \
+                --header "Content-Type=application/json" \
+                --body '{
+                    "nodepool_info": {
+                        "name": "...",
+                        "resource_group_id": <resource_group_id>
+                    },
+                    "scaling_group": {
+                        "vswitch_ids": [
+                            "vsw-uf62g8dnn8armcfssjl8r",
+                            "vsw-uf6h2ezyrvmujr0pl4acm",
+                            "vsw-uf6bsoxrror7eki2g5vtj"
+                        ],
+                        "data_disks": [
+                            {
+                                "category": "cloud_essd",
+                                "size": 120,
+                                "encrypted": "false",
+                                "performance_level": "PL0"
+                            }
+                        ],
+                        "vpc_id": "vpc-uf6ozdrez09gvl0dg6nll",
+                        "instance_charge_type": "PostPaid",
+                        "internet_max_bandwidth_out": 0,
+                        "soc_enabled": false,
+                        "security_hardening_os": false,
+                        "instance_types": [
+                            "ecs.u1-c1m2.xlarge"
+                        ],
+                        "system_disk_category": "cloud_essd",
+                        "system_disk_size": 80,
+                        "system_disk_encrypted": false,
+                        "system_disk_performance_level": "PL0",
+                        "multi_az_policy": "BALANCE",
+                        "platform": "AliyunLinux",
+                        "image_id": "aliyun_4_x64_20G_container_optimized_alibase_20261103.vhd",
+                        "image_type": "AliyunLinux4ContainerOptimized",
+                        "desired_size": 1,
+                        "instance_metadata_options": {
+                            "http_tokens": "optional"
+                        }
+                    },
+                    "kubernetes_config": {
+                        "cms_enabled": true,
+                        "unschedulable": false,
+                        "runtime": "containerd",
+                        "runtime_version": "2.3.4"
+                    },
+                    "auto_scaling": {
+                        "enable": false,
+                        "is_bond_eip": false
+                    },
+                    "tee_config": {
+                        "tee_enable": false
+                    },
+                    "node_config": {
+                        "image_acceleration_config": {
+                            "enable_image_acceleration": false
+                        }
+                    }
+                }'
+                
+                ```
+                
+                返回的内容包括但不限于：
+                
+                1. nodepool_id：节点池的id
+                2. task_id：负责创建该节点池的任务的id
+            - 创建节点池（指定快照）
+                
+                ```bash
+                aliyun cs POST /clusters/ClusterId/nodepools \
+                --region ... \
+                --header "Content-Type=application/json" \
+                --body '{
+                    "nodepool_info": {
+                        "name": "...",
+                        "resource_group_id": "rg-acfmwyxpbthyzza"
+                    },
+                    "scaling_group": {
+                        "vswitch_ids": [
+                            "vsw-uf62g8dnn8armcfssjl8r",
+                            "vsw-uf6h2ezyrvmujr0pl4acm",
+                            "vsw-uf6bsoxrror7eki2g5vtj"
+                        ],
+                        "data_disks": [
+                            {
+                                "category": "cloud_essd",
+                                "size": 120,
+                                "encrypted": "false",
+                                "performance_level": "PL0",
+                                "snapshot_id": "..."
+                            }
+                        ],
+                        "vpc_id": "vpc-uf6ozdrez09gvl0dg6nll",
+                        "instance_charge_type": "PostPaid",
+                        "internet_max_bandwidth_out": 0,
+                        "soc_enabled": false,
+                        "security_hardening_os": false,
+                        "instance_types": [
+                            "ecs.gn6v-c8g1.2xlarge"
+                        ],
+                        "system_disk_category": "cloud_essd",
+                        "system_disk_size": 80,
+                        "system_disk_encrypted": false,
+                        "system_disk_performance_level": "PL0",
+                        "multi_az_policy": "BALANCE",
+                        "platform": "AliyunLinux",
+                        "image_id": "aliyun_4_x64_20G_container_optimized_alibase_20261103.vhd",
+                        "image_type": "AliyunLinux4ContainerOptimized",
+                        "desired_size": 0,
+                        "instance_metadata_options": {
+                            "http_tokens": "optional"
+                        }
+                    },
+                    "kubernetes_config": {
+                        "cms_enabled": true,
+                        "unschedulable": false,
+                        "runtime": "containerd",
+                        "runtime_version": "2.3.4"
+                    },
+                    "auto_scaling": {
+                        "enable": false,
+                        "is_bond_eip": false
+                    },
+                    "tee_config": {
+                        "tee_enable": false
+                    },
+                    "node_config": {
+                        "image_acceleration_config": {
+                            "enable_image_acceleration": false
+                        }
+                    }
+                }'
+                
+                ```
+                
+            - 删除节点池
+                
+                aliyun cs delete-cluster-nodepool --cluster-id <ClusterId> --nodepool-id … --biz-force true --region <region>
+                
+                返回的内容包括但不限于：
+                
+                1. task_id：负责删除该节点池的任务的id
+            - 删除指定节点但保留ECS
+                
+                aliyun cs remove-node-pool-nodes --cluster-id <ClusterId> --nodepool-id … --release-node false --drain-node false --instance-ids … --concurrency true --region <region>
+                
+            - 列举指定节点池的各节点的id
+                
+                aliyun cs describe-cluster-nodes --cluster-id <ClusterId> --nodepool-id … --state all --region <region>
+                
+            - 后台等待任务运行结束
+                
+                ```bash
+                WaitTask.sh \
+                  --repeat-command 'aliyun cs describe-task-info --task-id ... --region <region>' \
+                  --condition '"state": "failed"|"state": "success"' \
+                  --poll-interval 30 \
+                  --max-time 3000
+                ```
+                
+            - 扩容节点池
+                
+                aliyun cs scale-cluster-node-pool --cluster-id <ClusterId>--nodepool-id … --count … --region <region>
+                
+        - aliyun操纵ECS的操作
+            - 列举现有的ECS
+                
+                aliyun ecs describe-instance-status --biz-region-id <region> --region <region>
+                
+            - 创建ECS实例、分配公网IP地址、启动ECS示例、远程连接
+                - 创建ECS实例
+                    
+                    `aliyun ecs create-instance --biz-region-id ... --image-id aliyun_3_x64_20G_alibase_20261119.vhd --instance-type ... --security-group-id ... --internet-charge-type PayByTraffic --internet-max-bandwidth-in 200 --internet-max-bandwidth-out 100 --system-disk-size <根据要下载的文件大小调整，确保磁盘充裕> --io-optimized optimized --instance-charge-type PostPaid --biz-key-pair-name ecs_secret --region ...`
+                    
+                - 给ECS示例分配公网IP地址
+                    
+                    aliyun ecs allocate-public-ip-address --instance-id … --region …
+                    
+                - 启动ECS示例
+                    
+                    aliyun ecs start-instance --instance-id … --region …
+                    
+                - 远程执行命令
+                    
+                    `ssh -i <ecs_secret_files>中指定地域的密钥文件 root@<public-ip-address> -o StrictHostKeyChecking=no "<command>"`
+                    
+                - 远程传输文件
+                    
+                    `scp -i <ecs_secret_files>中指定地域的密钥文件 root@<ecs-public-ip>:~/…`
+                    
+            - 创建密钥对并保存
+                1. mkdir -p /root/ecs_secrets/<region>
+                2. aliyun ecs create-key-pair --biz-region-id <region> --biz-key-pair-name ecs_secret --region <region> | jq -r ".PrivateKeyBody" > /root/ecs_secrets/<region>/ecs_secret.pem
+            - 删除密钥对
+                
+                aliyun ecs delete-key-pairs --biz-region-id <region> --key-pair-names '["ecs_secret"]' --region <region>
+                
+            - 操纵指定ECS运行命令（crictl拉取镜像）
+                
+                aliyun ecs run-command --biz-region-id <region> --type RunShellScript --command-content 'crictl pull --creds "<username>:<password>" <registry_address>/…/…:…' --instance-id … --region <region>
+                
+            - 查询ECS运行命令结果
+                
+                aliyun ecs describe-invocation-results --content-encoding PlainText --biz-region-id <region> --invoke-id … --region <region>
+                
+            - 查询指定ECS挂载的数据盘
+                
+                aliyun ecs describe-disks --biz-region-id <region> --instance-id … --region <region>
+                
+                返回中"Type": "data”的磁盘就是挂载的数据盘
+                
+            - 给指定数据盘保存快照
+                
+                aliyun ecs create-snapshot --disk-id … --region <region>
+                
+            - 后台查看指定快照保存情况
+                
+                ```bash
+                WaitTask.sh \
+                  --repeat-command "aliyun ecs describe-snapshots --biz-region-id <region> --snapshot-ids '[\"...\"]' --region <region>" \
+                  --condition '"Status": "accomplished"|"state": "failed"' \
+                  --poll-interval 30 \
+                  --max-time 3000
+                ```
+                
+            - 删除ECS实例
+                
+                aliyun ecs delete-instance --instance-id … --biz-force true --force-stop true --region <region>
+                
+- **config**
+    - environment（agent可以使用的环境）
+        
+        ```yaml
+        environment:
+          local: # 本地环境, agent可以直接操作
+        		- os: ubuntu_24.04
+        		  necessary_cli_tools: # 必须使用的命令行工具
+        		    - git
+        		    - uv
+        		    - ossutil
+        		    - gh
+        		    - aliyun
+        		    - kubectl
+        		  forbidden_ops:
+        		    - "禁止在本地环境拉取镜像，如有必要则暂停申请人工处理"
+        		    - "禁止在本地环境下载大型文件，如模型、数据集"
+        		    - "禁止在本地做冒烟测试，只能在远程环境做"
+          remote: # 远程环境，agent需要借助本地环境才能操作
+            platform_name: aliyun
+            necessary_services:
+              - ecs
+              - ack
+              - acr
+        ```
+        
+    - resources（各个阶段会用到的资源，包括已经提前准备好的和未知的）
+        - static_resources（已经准备好的资源）
+            
+            ```yaml
+            static_resources:
+              ecs_secret_files: # 用于远程连接启动的ecs实例
+                region: "local"
+                storage_path: "/root/ecs_secrets/<region_name>/ecs_secret.pem"
+                
+              ossutil_config_file: # 用于本地和远程ecs实例使用ossutil
+                region: "local"
+                storage_path: "/root/.ossutilconfig"
+                
+            	code_repository:
+            	  names: ["vllm", "lm-evaluation-harness", "transformers", "trl"]
+            	  region: "local"
+            	  storage_path: "/root/compress"
+            	  
+            	remote_image_repository:
+            	  test: # 测试使用的镜像
+            	    repo_name: "crpi-kqhgoddj8ldwo4ba.cn-shanghai.personal.cr.aliyuncs.com/test_random/test_ray"
+            	    tag: "v1"
+            	    region: "shanghai"
+            	  target: # 用于存放构建好的各个目标镜像，仓库名字预先给定，tag动态生成
+            	    repo_name: "test-acr-business-registry.cn-shanghai.cr.aliyuncs.com/test-llm-compressor/test"
+            			region: "shanghai"
+            	
+            	compute_resources: None
+            ```
+            
+        - dynamic_resources（工作期间动态需要补充、且需要任务正式进行过程中才清楚是什么的的资源）
+            
+            ```yaml
+            dynamic_resources:
+              - type: ["huggingface dataset", "huggingface model"]
+                get_method: "使用国内的hf镜像下载到本地环境然后上传到远程，再删除本地文件"
+                failure_fallback: "若因网络问题下载失败，暂停请求用户处理"
+                target_region: "same region as oss"
+                
+              - type: "aliyun ack cluster"
+                device_tag: "dynamic" # 取决于任务对于硬件资源量的需求
+                target_region: "dynamic" # 随着合适可用设备位置动态调整
+                clean_strategy: "不需要时及时删除，不要浪费金钱，尤其是带GPU的节点"
+                
+              - type: "aliyun ecs server"
+                device_tag: "dynamic" # 取决于任务对于硬件资源量的需求
+                target_region: "dynamic" # 随着合适可用设备位置动态调整
+                clean_strategy: "不需要时及时删除，不要浪费金钱，尤其是带GPU的节点"
+            ```
+            
+    - **stages_config（各个阶段需要用到的配置信息）**
+        - stage1: coding
+            - 编写pv.yaml的相关配置
+                
+                ```yaml
+                  csi:
+                    driver: ossplugin.csi.alibabacloud.com
+                    volumeHandle: ...  
+                    volumeAttributes:
+                      fuseType: ossfs2
+                      bucket: test-llm-compressor 
+                      region: cn-shanghai 
+                      path: / 
+                      # region在shanghai则使用内网
+                      url: "https://oss-cn-shanghai-internal.aliyuncs.com"  
+                      # region不在shanghai则使用公网
+                      # url: "https://oss-cn-shanghai.aliyuncs.com"
+                      otherOpts: "-o close_to_open=false"
+                      authType: "rrsa"
+                      roleName: "rrsa"  
+                      sigVersion: "v4"
+                ```
+                
+            
+            ```yaml
+            stage1: # coding
+              # 编写代码时是否使用git版本控制
+            	use_git: True
+            	allow_run_code_locally: False # 是否允许在本地执行耗时代码
+            	# 该阶段的产物
+            	output: 
+            	  # 该阶段的产物的存放路径
+            	  storage_path: "/root/test_training"
+            	  # 该阶段至少要产出的内容
+            	  necessary_asset: 
+            	    - "各个Dockerfile构建的镜像的存放仓库位置+tag，要与k8s文件中指定的image对应上"
+            	
+            	# 下载网络资源时使用的镜像（如正常命令或者编写dockerfile）
+            	mirrors: 
+            	  # 是否给各个网络资源下载操作设置开关，打开开关则使用镜像，关闭则不使用镜像
+            	  use_toggle: True # 是否使用开关
+            	  toggle_on: True # 是否打开开关
+            	  # 若打开开关/使用镜像，使用如下镜像
+            	  available_mirrors_if_needed:
+               	 - pip_index: https://pypi.tuna.tsinghua.edu.cn/simple/
+            	   - apt: http://mirrors.aliyun.com
+            	   - UV_INSTALLER_GITHUB_BASE_URL: "https://ghproxy.cn/https://github.com"
+            	   
+            	# 依赖
+            	dependency:
+            	  python_dependencies:
+            	    install_methods: "直接uv pip install"
+            	    compatability_check: "预先检查各个依赖的版本是否兼容"
+            ```
+            
+        - stage2: build
+            
+            ```yaml
+            stage2: # build
+              github_repo_address: https://github.com/liutiegen/test-training
+              acr:
+                instance-id: cri-49hkfmbw85y3jjt4 # <target-registry>的id
+                repo-id: crr-bcqdjvq1iygwoxtf # <target-namespace>的id
+                region: cn-shanghai # 目标仓库的所在地域
+                available_source_registry: ["docker.m.daocloud.io",] # 制品订阅规则中可用的镜像源
+            ```
+            
+        - stage3: run
+            
+            ```yaml
+            stage3: # run
+            	output: # 该阶段的产物的配置信息
+            	  storage_path: "oss://test-llm-compressor/output/"
+            	
+            	ecs:
+            	  crictl_pull: # 拉取镜像相关配置
+            		  method: 'crictl pull --creds "<username>:<password>"'
+            		  username: aliyun0806965638
+            		  passward: test-nkj1
+            		  registry_address: test-acr-business-registry.cn-shanghai.cr.aliyuncs.com
+            ```
+            
+- **strategy**
+    - pull_base_image
+        1. 列举ACR已有的制品订阅规则，选择某个已有规则更新
+        2. 根据已有的制品订阅规则创建制品订阅任务
+        3. 后台等待该制品订阅任务执行结束，成功则进入下一步，失败则告警等待人工处理
+        - 注：不能直接创建制品规则，只能修改现有制品规则
+            
+            由于制品规则的创建不能直接指定自定义的镜像源，所以用户会提前提供若干个制品订阅规则以供查看，然后根据情况更新现有制品规则
+            
+            列举已有制品订阅规则时的SourceDomain字段就是源registry，如果已有的registry都不满足则暂停请求人工处理
+            
+    - build_target_image
+        1. git push把项目提交到远程github仓库
+        2. 更新镜像构建规则，发起镜像构建，启动后台任务等待镜像构建完成
+        3. 对于失败的镜像构建，获取并分析日志，更新代码，重新构建
+    - prepare_physical_cluster
+        1. 创建ACK集群，获取kubeconfig保存到本地环境的~/.kube/config
+        2. 若需要的ACK集群已经存在则不创建
+        3. 测试更新~/.kube/config后，本地环境的kubectl相关命令能否正常执行
+    - prepare_physical_node_on_cluster
+        1. 创建0节点的节点池，等待节点池创建成功
+            1. 若该节点池的节点是用于拉取镜像，从而运行时加速容器启动的，则该节点池的节点需要挂载数据盘
+            2. 若该节点池是用于运行业务代码的，则该节点池的节点需要挂载数据盘，数据盘由先前保存的快照构建，从而加速运行代码时的容器启动
+        2. 扩容节点池，等待扩容成功
+    - prepare_github_repo
+        
+        （已有则不创建）gh repo create <repo-name> --public
+        
+    - download_files
+        1. 让该节点下载后续运行业务代码时所需的数据集，已有的不用下载。要求下载的时候使用合适的mirror，确保下载速度至少>500KB/s
+    - accelerate_image_pull
+        1. 删除该节点但保留ECS
+        2. 进入该ECS拉取stage2构建的镜像，这会保存在数据盘挂载的位置
+        3. 创建数据盘快照
+        4. 删掉节点
+        5. 删掉节点池
+    - prepare_physical_node
+        1. 创建指定地域的密钥对（已有则不创建）并保存在本地环境
+        2. 创建ECS节点
+        3. 分配公网IP地址
+        4. 启动ECS节点
+        5. 测试能通过ssh连接并运行命令
+    - upload_resources
+        1. 把本地的/root/.ossconfig上传到远程物理节点上
+        2. 在远程物理节点安装ossutil
+        3. 在远程物理节点把文件通过ossutil上传
+    - write_generic_operation_code
+        1. 编写Dockerfile和k8s相关文件，用于后续下载和上传资源。
+    - **write_specific_operation_code**
+        1. 研究transformers, trl和verl库代码，选择一个7B的模型，研究想要对该模型做有监督微调和强化学习（都使用lora）的话需要怎么写代码，写出对应代码
+        2. 编写评测脚本，分别评测微调前后的指标
+    - **run_code**
+        - 准备数据集、模型
+            - 流程
+                1. osutil cp …
+                2. 暂停，提醒人工审核验证
+        - 微调模型并评测
+            - 流程
+                1. kubectl apply -f …
+                2. 暂停，提醒人工审核验证
+            - 交付内容
+                1. 微调后的模型文件以及指标
+- 工作流
+    
+    按照stage1→stage2→stage3，即设计→构建→运行的流程进行，若环节出错则循环（维护）
+    
+    - stage1：在本地环境编写项目代码
+        - 编写各业务通用代码
+            
+            根据{strategy.write_generic_operation_code}策略编写各个业务通用的代码
+            
+        - 编写具体业务代码
+            
+            根据{strategy.write_specific_operation_code}策略编写当前业务任务所需的代码
+            
+    - stage2：在本地环境操纵远程环境构建镜像
+        - 拉取base镜像
+            - 拉取base镜像的变量名对照
+                
+                ```powershell
+                实际构建target镜像之前，需要先拉取相关的base镜像到云服务器能内网访问的目标仓库，否则构建阶段容易出现网络问题。
+                称base镜像原本存在于 <source-registry>/<source-namespace>/<source-repo>:<base-tag>，
+                称base镜像拉取到的目标位置为 <target-registry>/<target-namespace>/<target-repo>:<base-tag>，
+                实际构建时，dockerfile中的FROM语句为FROM <target-registry>/<target-namespace>/<target-repo>:<base-tag>
+                构建好的目标镜像会存到 <target-registry>/<target-namespace>/<target-repo>:<target-tag>
+                k8s部署运行镜像时使用 image: <target-registry>/<target-namespace>/<target-repo>:<target-tag>
+                ```
+                
+            1. 校验配置信息中的available_source_registry是否存在于现有的制品订阅规则中
+            2. 通过{strategy.pull_base_image}策略把base镜像从<source-registry>/<source-namespace>/<source-repo>:<base-tag>拉取到<target-registry>/<target-namespace>/<target-repo>:<base-tag>
+        - 构建目标镜像
+            1. 通过{strategy.prepare_github_repo}策略准备远程github仓库
+            2. 通过{strategy.build_target_image}策略构建目标镜像
+    - stage3：在本地环境操纵远程环境运行代码
+        - 准备运行代码时所需资源
+            - 准备文件
+                1. 通过{strategy.prepare_physical_node}策略准备节省的、无GPU的远程物理节点
+                2. 通过{strategy.download_files}策略下载业务代码所需要的资源
+                3. 通过{strategy.upload_resources}把资源上传到运行业务代码时能直接访问到的地方
+            - 准备镜像
+                1. 通过{strategy.prepare_physical_cluster}策略准备k8s集群
+                2. 通过{strategy.prepare_physical_node_on_cluster}策略在准备好的k8s集群上准备节省的、无GPU的物理节点
+                3. 通过{strategy.accelerate_image_pull}策略提前把构建好的镜像拉取到新创建的节点的可挂载数据盘中，保存快照
+            - 准备运行业务代码的服务器
+                1. 通过{strategy.prepare_physical_cluster}策略准备k8s集群
+                2. 通过{strategy.prepare_physical_node_on_cluster}策略在准备好的k8s集群上准备GPU合适的物理节点
+        - 运行业务代码
+            1. 通过{strategy.run_code}策略启动pod运行代码
+        - 清理各节点，以免浪费

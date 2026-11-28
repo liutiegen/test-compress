@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 本地运行产物 —— 不进仓库
+artifacts/
+logs/
+results/
+output/
+*.log
+
+# 凭据
+.ossutilconfig
+*.pem
+kubeconfig
+
+# 临时
+.DS_Store
+*.swp
